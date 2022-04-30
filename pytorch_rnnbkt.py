@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import itertools
 import pandas as pd
@@ -10,7 +11,7 @@ class BKT_RNN(nn.Module):
     def __init__(self, x_size = 1, hidden_size = 4):
         super(BKT_RNN, self).__init__()
         self.prior = nn.Parameter(torch.Tensor([0.1]).cuda())
-        self.rnn = nn.RNN(input_size = x_size, hidden_size = hidden_size).cuda()
+        self.rnn = nn.LSTM(input_size = x_size, hidden_size = hidden_size, num_layers = 2).cuda()
         self.params = self.rnn.parameters()
         self.optimizer = optim.Adam(itertools.chain([self.prior], self.rnn.parameters()))
         self.loss = nn.BCELoss()
@@ -23,7 +24,7 @@ class BKT_RNN(nn.Module):
         params = (output + 1) / 2
         loss = 0
         for i in range(len(x)):
-            latentsi, correctsi = self.extract_latent_correct(params[i], latentsi if i > 0 else self.sigmoid(self.prior))
+            correctsi, latentsi = self.extract_latent_correct(params[i], latentsi if i > 0 else self.sigmoid(self.prior))
             loss = loss + self.loss(correctsi, y[i])
             latents[i], corrects[i] = latentsi, correctsi
         loss = loss / len(x)
@@ -80,8 +81,9 @@ def train(model, batches_train, batches_val, num_epochs):
             model.update(X, y)
         if epoch % 20 == 0:
             print(f"Epoch {epoch}/{num_epochs} - [VALIDATION ACCURACY: {model.score_acc(batches_val)}, VALIDATION AUC: {model.score_auc(batches_val)}]")
-            torch.save(model.state_dict(), f"ckpts/model-{epoch}.pth")
+            torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}.pth")
 
+tag = sys.argv[1]
 data = pd.read_csv('as.csv', encoding = 'latin')
 data = data[data['skill_name'] == 'Equation Solving Two or Fewer Steps']
 seqs = data.groupby('user_id')['correct'].agg(list)
