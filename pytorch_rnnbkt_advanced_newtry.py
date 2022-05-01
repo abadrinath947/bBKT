@@ -8,23 +8,23 @@ from sklearn.metrics import *
 from torch import nn
 import torch.optim as optim
 
-data = pd.read_csv('ct.csv', encoding = 'latin')
+data = pd.read_csv('as.csv', encoding = 'latin')
 tag = sys.argv[1]
 num_epochs = 500
 batch_size = 128
-train_split = 0.5
+train_split = 0.9
 
 class BKT_RNN(nn.Module):
-    def __init__(self, x_size = 1, hidden_size = 128):
+    def __init__(self, x_size = 1, hidden_size = 32):
         super(BKT_RNN, self).__init__()
         self.skill_prior_net = nn.Sequential(nn.Linear(x_size, 1), nn.Sigmoid()).cuda()
-        self.rnn = nn.RNN(input_size = x_size, hidden_size = hidden_size, num_layers = 3, dropout = 0.33).cuda()
+        self.rnn = nn.RNN(input_size = x_size, hidden_size = hidden_size).cuda()
         self.postprocess = nn.Sequential(nn.Linear(hidden_size, 4), nn.Sigmoid()).cuda()
         self.params = itertools.chain(self.rnn.parameters(), self.skill_prior_net.parameters(), self.postprocess.parameters())
         self.optimizer = optim.Adam(self.params)
         self.loss = nn.BCELoss()
 
-    def forward(self, x, y):
+    def forward(self, x, y, return_params = False):
         corrects = torch.zeros_like(y, dtype=torch.float32, requires_grad = False).to(x.device)
         latents = torch.zeros_like(y, dtype=torch.float32, requires_grad = False).to(x.device)
         output, _ = self.rnn(x)
@@ -35,6 +35,8 @@ class BKT_RNN(nn.Module):
             loss = loss + self.loss(correctsi, y[i])
             latents[i], corrects[i] = latentsi, correctsi
         loss = loss / len(x)
+        if return_params:
+            return corrects, latents, params, loss
         return corrects, latents, loss
 
     def extract_latent_correct(self, params, latent):
@@ -54,12 +56,14 @@ class BKT_RNN(nn.Module):
         return loss
 
     def score_acc(self, batches):
-        num_correct, num_total = 0, 0
-        for X, y in batches_val:
+        ypred, ytrue = [], []
+        for X, y in batches:
             corrects, _, _ = model.forward(X, y)
-            k, n = (corrects.round() == y).float().sum(), torch.numel(corrects) 
-            num_correct, num_total = num_correct + k, num_total + n
-        return num_correct, num_total
+            ypred.append(corrects.ravel().detach().cpu().numpy())
+            ytrue.append(y.ravel().detach().cpu().numpy())
+        ypred = np.concatenate(ypred)
+        ytrue = np.concatenate(ytrue)
+        return accuracy_score(ytrue, ypred.round(0))
 
     def score_auc(self, batches):
         ypred, ytrue = [], []
@@ -71,24 +75,35 @@ class BKT_RNN(nn.Module):
         ytrue = np.concatenate(ytrue)
         return roc_auc_score(ytrue, ypred)
 
+    def score_rmse(self, batches):
+        ypred, ytrue = [], []
+        for X, y in batches:
+            corrects, _, _ = model.forward(X, y)
+            ypred.append(corrects.ravel().detach().cpu().numpy())
+            ytrue.append(y.ravel().detach().cpu().numpy())
+        ypred = np.concatenate(ypred)
+        ytrue = np.concatenate(ytrue)
+        return np.sqrt(((ytrue - ypred) ** 2).mean())
+
 def preprocess_data(data):
     ohe_data = ohe.transform(data[ohe_columns])
     ohe_column_names = [f'ohe{i}' for i in range(len(ohe_data[0]))]
     ohe_data = pd.DataFrame(ohe_data, index = data.index, columns = ohe_column_names)
     data = data.join(ohe_data)
-    features = ['Correct First Attempt'] * 100 + ['Incorrects', 'Step Duration (sec)', 'Problem View'] + ohe_column_names
-    seqs = data.groupby(['Anon Student Id', 'KC(Default)'])[features].apply(lambda x: x.values.tolist())
+    data['response_time'] = data['ms_first_response'] / 10000
+    features = ['correct'] * 100 + ['response_time', 'attempt_count', 'hint_count', 'first_action', 'position'] + ohe_column_names
+    seqs = data.groupby(['user_id', 'skill_name'])[features].apply(lambda x: x.values.tolist())
     return seqs
 
 
 def construct_batches(raw_data):
-    lengths = raw_data.groupby(['Anon Student Id', 'KC(Default)']).size().reset_index().rename(columns = {0: 'length'})
+    lengths = raw_data.groupby(['user_id', 'skill_name']).size().reset_index().rename(columns = {0: 'length'})
     vc = lengths['length'].value_counts()
     for lens in vc.index:
-        if lens > 5:
+        if lens > 2:
             relevant_lengths = lengths[lengths['length'] == lens]
-            filtered_data = raw_data.merge(relevant_lengths, on = ['Anon Student Id', 'KC(Default)']).sort_values(['Anon Student Id', 'KC(Default)', 'Row'])
-            for b in range(len(filtered_data) // (batch_size * lens)):
+            filtered_data = raw_data.merge(relevant_lengths, on = ['user_id', 'skill_name']).sort_values(['user_id', 'skill_name', 'order_id'])
+            for b in range(len(filtered_data) // (batch_size * lens) + 1):
                 l, u = b * batch_size * lens, (b + 1) * batch_size * lens
                 batch_preprocessed = preprocess_data(filtered_data.iloc[l:u])
                 batch = np.array(batch_preprocessed.to_list())
@@ -112,13 +127,14 @@ def train(model, batches_train, batches_val, num_epochs):
 def train_test_split(data, skill_list = None):
     np.random.seed(42)
     if skill_list is not None:
-        data = data[data['KC(Default)'].isin(skill_list)]
-    data = data.set_index(['Anon Student Id', 'KC(Default)'])
+        data = data[data['skill_name'].isin(skill_list)]
+    data = data.set_index(['user_id', 'skill_name'])
     idx = np.random.permutation(data.index.unique())
     train_idx, test_idx = idx[:int(train_split * len(idx))], idx[int(train_split * len(idx)):]
     data_train = data.loc[train_idx].reset_index()
     data_val = data.loc[test_idx].reset_index()
     return data_train, data_val
+
 
 if __name__ == '__main__': 
     """
@@ -131,13 +147,23 @@ if __name__ == '__main__':
     data_train, data_val = train_test_split(data)
     print("Train-test split complete...")
     ohe = OneHotEncoder(sparse = False, handle_unknown='ignore')
-    ohe_columns = ['Problem Name', 'Step Name', 'Problem Hierarchy']
+    ohe_columns = ['first_action', 'skill_id', 'template_id', 'student_class_id', 'sequence_id']
     ohe.fit(data_train[ohe_columns])
     print("OHE complete...")
 
     batches_train = construct_batches(data_train)
     batches_val = construct_batches(data_val)
-    model = BKT_RNN(x_size = 661)
+    model = BKT_RNN(x_size = 1966)
 
+    model.load_state_dict(torch.load('ckpts/model-newtry-rnn-29.pth'))
+    """
+    val = list(batches_val)
+    for i, (X, y) in enumerate(val):
+        if y.shape[0] > 5:
+            corrects, latents, params, loss = model(X, y, True)
+            for j in range(y.shape[1]):
+                if y[:, j, :].mean() < latents[:, j, :].max() and latents[:, j, :].max() >= 0.75 and torch.unique_consecutive(y[:, j]).numel() >= 0.5 * y[:, j].numel():
+                    print(i, j, y[:, j], latents[:, j])
+    """
     print("Beginning training...")
-    train(model, data_train, data_val, num_epochs)
+    #train(model, data_train, data_val, num_epochs)

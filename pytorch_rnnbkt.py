@@ -7,13 +7,14 @@ from sklearn.metrics import *
 from torch import nn
 import torch.optim as optim
 
+
 class BKT_RNN(nn.Module):
     def __init__(self, x_size = 1, hidden_size = 4):
         super(BKT_RNN, self).__init__()
         self.prior = nn.Parameter(torch.Tensor([0.1]).cuda())
-        self.rnn = nn.LSTM(input_size = x_size, hidden_size = hidden_size, num_layers = 2).cuda()
+        self.rnn = nn.RNN(input_size = x_size, hidden_size = hidden_size).cuda()
         self.params = self.rnn.parameters()
-        self.optimizer = optim.Adam(itertools.chain([self.prior], self.rnn.parameters()))
+        self.optimizer = optim.Adam(itertools.chain([self.prior], self.rnn.parameters()), lr = 2e-3)
         self.loss = nn.BCELoss()
         self.sigmoid = nn.Sigmoid()
 
@@ -64,6 +65,16 @@ class BKT_RNN(nn.Module):
         ytrue = np.concatenate(ytrue)
         return roc_auc_score(ytrue, ypred)
 
+    def score_rmse(self, batches):
+        ypred, ytrue = [], []
+        for X, y in batches:
+            corrects, _, _ = model.forward(X, y)
+            ypred.append(corrects.ravel().detach().cpu().numpy())
+            ytrue.append(y.ravel().detach().cpu().numpy())
+        ypred = np.concatenate(ypred)
+        ytrue = np.concatenate(ytrue)
+        return np.sqrt(((ytrue - ypred) ** 2).mean())
+
 def construct_batches(seqs):
     batches = []
     for lens in seqs.str.len().unique():
@@ -96,4 +107,5 @@ batches_val = construct_batches(seqs_val)
 model = BKT_RNN()
 num_epochs = 5000
 
-train(model, batches_train, batches_val, num_epochs)
+if False:
+    train(model, batches_train, batches_val, num_epochs)

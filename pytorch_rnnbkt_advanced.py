@@ -24,7 +24,7 @@ class BKT_RNN(nn.Module):
         self.optimizer = optim.Adam(self.params)
         self.loss = nn.BCELoss()
 
-    def forward(self, x, y):
+    def forward(self, x, y, return_params = False):
         corrects = torch.zeros_like(y, dtype=torch.float32, requires_grad = False).to(x.device)
         latents = torch.zeros_like(y, dtype=torch.float32, requires_grad = False).to(x.device)
         output, _ = self.rnn(x)
@@ -35,6 +35,8 @@ class BKT_RNN(nn.Module):
             loss = loss + self.loss(correctsi, y[i])
             latents[i], corrects[i] = latentsi, correctsi
         loss = loss / len(x)
+        if return_params:
+            return corrects, latents, params, loss
         return corrects, latents, loss
 
     def extract_latent_correct(self, params, latent):
@@ -121,6 +123,7 @@ def train_test_split(data, skill_list = None):
     data_val = data.loc[test_idx].reset_index()
     return data_train, data_val
 
+
 if __name__ == '__main__': 
     """
     Equation Solving Two or Fewer Steps              24253
@@ -140,5 +143,15 @@ if __name__ == '__main__':
     batches_val = construct_batches(data_val)
     model = BKT_RNN(x_size = 1966)
 
+    model.load_state_dict(torch.load('ckpts/working_advanced_as/model-lfbhs-5.pth'))
+    """
+    val = list(batches_val)
+    for i, (X, y) in enumerate(val):
+        if y.shape[0] > 5:
+            corrects, latents, params, loss = model(X, y, True)
+            for j in range(y.shape[1]):
+                if y[:, j, :].mean() < latents[:, j, :].max() and latents[:, j, :].max() >= 0.75 and torch.unique_consecutive(y[:, j]).numel() >= 0.5 * y[:, j].numel():
+                    print(i, j, y[:, j], latents[:, j])
+    """
     print("Beginning training...")
-    train(model, data_train, data_val, num_epochs)
+    # train(model, data_train, data_val, num_epochs)
