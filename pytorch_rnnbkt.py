@@ -78,7 +78,7 @@ class BKT_RNN(nn.Module):
 def construct_batches(seqs):
     batches = []
     for lens in seqs.str.len().unique():
-        if lens > 5:
+        if lens > 1:
             batch = pd.DataFrame(seqs[seqs.str.len() == lens].to_list()).to_numpy()
             batch = batch.T[..., None]
             X, y = torch.tensor(batch[:-1], requires_grad=True, dtype=torch.float32).cuda(), torch.tensor(batch[1:], requires_grad=True, dtype=torch.float32).cuda()
@@ -91,7 +91,7 @@ def train(model, batches_train, batches_val, num_epochs):
         for X, y in batches_train:
             model.update(X, y)
         if epoch % 20 == 0:
-            print(f"Epoch {epoch}/{num_epochs} - [VALIDATION ACCURACY: {model.score_acc(batches_val)}, VALIDATION AUC: {model.score_auc(batches_val)}]")
+            print(f"Epoch {epoch}/{num_epochs} - [VALIDATION ACCURACY: {model.score_acc(batches_val)}, VALIDATION AUC: {model.score_auc(batches_val)}, VALIDATION RMSE: {model.score_rmse(batches_val)}]")
             torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}.pth")
 
 tag = sys.argv[1]
@@ -99,13 +99,13 @@ data = pd.read_csv('as.csv', encoding = 'latin')
 data = data[data['skill_name'] == 'Equation Solving Two or Fewer Steps']
 seqs = data.groupby('user_id')['correct'].agg(list)
 seqs = seqs.sample(frac = 1, random_state = 42)
-seqs_train = seqs.iloc[100:]
-seqs_val = seqs.iloc[:100]
+seqs_train = seqs.iloc[200:]
+seqs_val = seqs.iloc[:200]
 print(seqs_train.shape, seqs_val.shape)
 batches_train = construct_batches(seqs_train)
 batches_val = construct_batches(seqs_val)
 model = BKT_RNN()
 num_epochs = 5000
 
-if False:
+if True:
     train(model, batches_train, batches_val, num_epochs)
