@@ -56,17 +56,7 @@ def train_test_split(data, skill_list = None):
     data_val = data.loc[test_idx].reset_index()
     return data_train, data_val
 
-def score_acc(model, batches):
-    num_correct, num_total = 0, 0
-    for X, y in batches_val:
-        mask = y[..., -1] != -1000
-        corrects = model.forward(X, y[..., 0])[mask]
-        y = y[..., -1].unsqueeze(-1)[mask]
-        k, n = (corrects.round() == y).float().sum(), torch.numel(corrects)
-        num_correct, num_total = num_correct + k, num_total + n
-    return num_correct, num_total
-
-def score_auc(model, batches):
+def evaluate(model, batches):
     ypred, ytrue = [], []
     for X, y in batches:
         mask = y[..., -1] != -1000
@@ -76,7 +66,7 @@ def score_auc(model, batches):
         ytrue.append(y.ravel().detach().cpu().numpy())
     ypred = np.concatenate(ypred)
     ytrue = np.concatenate(ytrue)
-    return roc_auc_score(ytrue, ypred)
+    return ypred, ytrue #roc_auc_score(ytrue, ypred)
 
 if __name__ == '__main__': 
     """
@@ -97,7 +87,7 @@ if __name__ == '__main__':
     batches_val = construct_batches(data_val)
     config = GPTConfig(vocab_size = 4 * len(ohe.get_feature_names_out()), block_size = block_size, n_layer = 2, n_head = 8, n_embd = 48)
     model = GPT(config).cuda()
-    # model.load_state_dict(torch.load('ckpts/model-finalagain-36-0.8347352506057684.pth'))
+    model.load_state_dict(torch.load('ckpts/model-run5-2-0.8631398627913214.pth'))
     print("Total Parameters:", sum(p.numel() for p in model.parameters()))
 
     # train_config = TrainerConfig(**{'max_epochs': 5, 'batch_size': 16, 'learning_rate': 0.0005, 'lr_decay': True, 'warmup_tokens': 10240, 'final_tokens': 7185240, 'num_workers': 4, 'seed': 123, 'model_type': 'reward_conditioned', 'game': 'Breakout', 'max_timestep': 1842})
@@ -125,20 +115,11 @@ if __name__ == '__main__':
                 auc = score_auc(model, batches_val)
                 print(f"Epoch {epoch}/{num_epochs} - [VALIDATION AUC: {auc}]")
                 torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}-{auc}.pth")
-    train(3)
+    # train(3)
 
-    """
-    model.eval()
-    batches_val = construct_batches(data_val)
-    print(score_auc(model, batches_val))
-    batches_val = construct_batches(data_val)
-    print(score_rmse(model, batches_val))
-    batches_val = construct_batches(data_val)
-    print(score_acc(model, batches_val))
-    for i, (X, y) in enumerate(val):
-        if y.shape[0] > 5:
-            corrects, latents, params, loss = model(X, y, True)
-            for j in range(y.shape[1]):
-                if y[:, j, :].mean() < latents[:, j, :].max() and latents[:, j, :].max() >= 0.75 and torch.unique_consecutive(y[:, j]).numel() >= 0.5 * y[:, j].numel():
-                    print(i, j, y[:, j], latents[:, j])
-    """
+    X = torch.load('X.pt').cuda()
+    y = torch.load('y.pt').cuda()
+
+    corrects, latents, params = model(X, skill_idx = y[..., 0].detach(), return_latent = True)
+    latents = [l.detach().cpu().numpy() for l in latents]
+    import pdb; pdb.set_trace()

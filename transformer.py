@@ -233,7 +233,7 @@ class GPT(nn.Module):
         return optimizer
 
     # state, action, and return
-    def forward(self, obs, skill_idx = None):
+    def forward(self, obs, skill_idx = None, return_latent = False):
         B, T, D = obs.shape
         token_embeddings = self.obs_emb(obs) # (batch * block_size, n_embd)
         # all_global_pos_emb = torch.repeat_interleave(self.global_pos_emb, batch_size, dim=0) # batch_size, traj_length, n_embd
@@ -245,15 +245,19 @@ class GPT(nn.Module):
         logits = self.head(x)
         logits = logits.view(B, T, -1, 4)
         corrects, latent = torch.zeros_like(logits[..., -1]), self.prior
+        latents = []
         for i in range(logits.shape[1]):
             latent = torch.clamp(latent, min = 0, max = 1)
+            latents.append(latent)
             correct, latent = self.extract_latent_correct(logits[:, i].view(B, -1, 4), latent)
             corrects[:, i] = correct.squeeze()
         if skill_idx is not None:
             skill_idx = torch.where(skill_idx == -1000, 0, skill_idx)
             if skill_idx.max() >= corrects.shape[-1]:
                 import pdb; pdb.set_trace()
-            return torch.gather(corrects, dim = -1, index = skill_idx.long().unsqueeze(-1))
+            corrects = torch.gather(corrects, dim = -1, index = skill_idx.long().unsqueeze(-1))
+        if return_latent:
+            return corrects, latents, logits
         return corrects
 
     def extract_latent_correct(self, params, latent):
