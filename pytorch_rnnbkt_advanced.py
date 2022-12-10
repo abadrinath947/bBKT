@@ -142,6 +142,7 @@ if __name__ == '__main__':
     batches_train = construct_batches(data_train)
     batches_val = construct_batches(data_val)
     model = BKT_RNN(x_size = 1966)
+    print("Total Parameters:", sum(p.numel() for p in model.parameters()))
 
     model.load_state_dict(torch.load('ckpts/working_advanced_as/model-lfbhs-5.pth'))
     """
