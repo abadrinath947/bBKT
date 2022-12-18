@@ -168,7 +168,8 @@ class GPT(nn.Module):
 
 
         # self.obs_emb = nn.Sequential(nn.Linear(151, config.n_embd), nn.Tanh())
-        self.obs_emb = nn.Sequential(nn.Linear(125, config.n_embd), nn.Tanh())
+        # self.obs_emb = nn.Sequential(nn.Linear(125, config.n_embd), nn.Tanh())
+        self.obs_emb = nn.Sequential(nn.Linear(1605, config.n_embd), nn.Tanh())
         self.prior = nn.Parameter(torch.Tensor([0.1] * (config.vocab_size // 4)).view(1, -1, 1))
 
     def get_block_size(self):

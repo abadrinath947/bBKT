@@ -25,17 +25,17 @@ def preprocess_data(data):
     data['response_time'] = data['ms_first_response'] / 10000
     data['skill_idx'] = np.argmax(data[ohe_column_names].to_numpy(), axis = 1)
     # features = ['correct'] * 20 + ['response_time', 'attempt_count', 'hint_count', 'first_action', 'position'] + ohe_column_names
-    features = ['skill_idx', 'correct'] + ohe_column_names
+    features = ['skill_idx', 'correct'] + ohe_column_names + ['response_time', 'attempt_count', 'hint_count', 'first_action', 'position']
     seqs = data.groupby(['user_id']).apply(lambda x: x[features].values.tolist())
     length = min(max(seqs.str.len()), block_size)
     seqs = seqs.apply(lambda s: s[:length] + (length - min(len(s), length)) * [[-1000] * len(features)])
     return seqs
 
-def construct_batches(raw_data, epoch = 0, val = True):
+def construct_batches(raw_data, epoch = 0, val = False):
     np.random.seed(epoch)
     user_ids = raw_data['user_id'].unique()
     for _ in range(len(user_ids) // batch_size):
-        user_idx = raw_data['user_id'].sample(batch_size).unique() if not val else user_ids[_ * batch_size: (_ + 1) * batch_size]
+        user_idx = raw_data['user_id'].sample(batch_size).unique() if not val else user_ids[_ * (batch_size // 2): (_ + 1) * (batch_size // 2)]
         filtered_data = raw_data[raw_data['user_id'].isin(user_idx)].sort_values(['user_id', 'order_id'])
         batch_preprocessed = preprocess_data(filtered_data)
         batch = np.array(batch_preprocessed.to_list())
@@ -79,7 +79,7 @@ if __name__ == '__main__':
     data_train, data_val = train_test_split(data)
     print("Train-test split complete...")
     ohe = OneHotEncoder(sparse = False, handle_unknown='ignore')
-    ohe_columns = ['skill_id'] # ['first_action', 'skill_id']#, 'template_id']
+    ohe_columns = ['skill_id', 'first_action','sequence_id', 'template_id']
     ohe.fit(data_train[ohe_columns])
     print("OHE complete...")
 
@@ -87,7 +87,7 @@ if __name__ == '__main__':
     batches_val = construct_batches(data_val)
     config = GPTConfig(vocab_size = 4 * len(ohe.get_feature_names_out()), block_size = block_size, n_layer = 2, n_head = 8, n_embd = 48)
     model = GPT(config).cuda()
-    model.load_state_dict(torch.load('ckpts/model-run5-2-0.8631398627913214.pth'))
+    # model.load_state_dict(torch.load('ckpts/model-run5-2-0.8631398627913214.pth'))
     print("Total Parameters:", sum(p.numel() for p in model.parameters()))
 
     # train_config = TrainerConfig(**{'max_epochs': 5, 'batch_size': 16, 'learning_rate': 0.0005, 'lr_decay': True, 'warmup_tokens': 10240, 'final_tokens': 7185240, 'num_workers': 4, 'seed': 123, 'model_type': 'reward_conditioned', 'game': 'Breakout', 'max_timestep': 1842})
@@ -112,14 +112,15 @@ if __name__ == '__main__':
             if epoch % 1 == 0:
                 batches_val = construct_batches(data_val, val = True)
                 model.eval()
-                auc = score_auc(model, batches_val)
-                print(f"Epoch {epoch}/{num_epochs} - [VALIDATION AUC: {auc}]")
+                ypred, ytrue = evaluate(model, batches_val)
+                print(f"Epoch {epoch}/{num_epochs} - [VALIDATION AUC: {roc_auc_score(ytrue, ypred)}]")
                 torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}-{auc}.pth")
-    # train(3)
-
+    train(2)
+    """
     X = torch.load('X.pt').cuda()
     y = torch.load('y.pt').cuda()
 
     corrects, latents, params = model(X, skill_idx = y[..., 0].detach(), return_latent = True)
     latents = [l.detach().cpu().numpy() for l in latents]
     import pdb; pdb.set_trace()
+    """
