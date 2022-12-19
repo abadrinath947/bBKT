@@ -113,9 +113,10 @@ if __name__ == '__main__':
                 batches_val = construct_batches(data_val, val = True)
                 model.eval()
                 ypred, ytrue = evaluate(model, batches_val)
-                print(f"Epoch {epoch}/{num_epochs} - [VALIDATION AUC: {roc_auc_score(ytrue, ypred)}]")
+                auc = roc_auc_score(ytrue, ypred)
+                print(f"Epoch {epoch}/{num_epochs} - [VALIDATION AUC: {auc}]")
                 torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}-{auc}.pth")
-    train(2)
+    # train(2)
     """
     X = torch.load('X.pt').cuda()
     y = torch.load('y.pt').cuda()

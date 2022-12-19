@@ -167,8 +167,7 @@ class GPT(nn.Module):
         logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
 
-        # self.obs_emb = nn.Sequential(nn.Linear(151, config.n_embd), nn.Tanh())
-        # self.obs_emb = nn.Sequential(nn.Linear(125, config.n_embd), nn.Tanh())
+        #self.obs_emb = nn.Sequential(nn.Linear(125, config.n_embd), nn.Tanh())
         self.obs_emb = nn.Sequential(nn.Linear(1605, config.n_embd), nn.Tanh())
         self.prior = nn.Parameter(torch.Tensor([0.1] * (config.vocab_size // 4)).view(1, -1, 1))
 
