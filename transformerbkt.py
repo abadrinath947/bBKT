@@ -3,6 +3,7 @@ import sys
 import itertools
 import pandas as pd
 import torch
+from pyBKT.models import Model
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import *
 from torch import nn
@@ -58,6 +59,7 @@ def train_test_split(data, skill_list = None):
 
 def evaluate(model, batches):
     ypred, ytrue = [], []
+    import pdb; pdb.set_trace()
     for X, y in batches:
         mask = y[..., -1] != -1000
         corrects = model.forward(X, y[..., 0])[mask]
@@ -67,6 +69,13 @@ def evaluate(model, batches):
     ypred = np.concatenate(ypred)
     ytrue = np.concatenate(ytrue)
     return ypred, ytrue #roc_auc_score(ytrue, ypred)
+
+def bkt_benchmark(train_data, test_data, **model_type):
+    model = Model()
+    model.fit(data = train_data, **model_type)
+    print(model.params().reset_index().shape)
+    return model.evaluate(data = test_data, metric = ['auc', 'accuracy', 'rmse'])
+
 
 if __name__ == '__main__': 
     """
@@ -85,9 +94,9 @@ if __name__ == '__main__':
 
     batches_train = construct_batches(data_train)
     batches_val = construct_batches(data_val)
-    config = GPTConfig(vocab_size = 4 * len(ohe.get_feature_names_out()), block_size = block_size, n_layer = 2, n_head = 8, n_embd = 48)
+    config = GPTConfig(vocab_size = 4 * len(ohe.get_feature_names_out()), block_size = block_size, n_layer = 2, n_head = 8, n_embd = 48, input_size = 1605)
     model = GPT(config).cuda()
-    # model.load_state_dict(torch.load('ckpts/model-run5-2-0.8631398627913214.pth'))
+    model.load_state_dict(torch.load('final_runs/model-addtlfeatures5-1-0.8771260586913802.pth'))
     print("Total Parameters:", sum(p.numel() for p in model.parameters()))
 
     # train_config = TrainerConfig(**{'max_epochs': 5, 'batch_size': 16, 'learning_rate': 0.0005, 'lr_decay': True, 'warmup_tokens': 10240, 'final_tokens': 7185240, 'num_workers': 4, 'seed': 123, 'model_type': 'reward_conditioned', 'game': 'Breakout', 'max_timestep': 1842})
@@ -118,10 +127,19 @@ if __name__ == '__main__':
                 torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}-{auc}.pth")
     # train(2)
     """
-    X = torch.load('X.pt').cuda()
-    y = torch.load('y.pt').cuda()
-
-    corrects, latents, params = model(X, skill_idx = y[..., 0].detach(), return_latent = True)
-    latents = [l.detach().cpu().numpy() for l in latents]
-    import pdb; pdb.set_trace()
+    bkt = []
+    for _ in range(5):
+        bkt.append(bkt_benchmark(data_train, data_val))
+    bkt_mlfgs = []
+    for _ in range(5):
+        bkt_mlfgs.append(bkt_benchmark(data_train, data_val, multigs = 'opportunity', multilearn = 'opportunity', forgets = True))
+    bkt_mlf = []
+    for _ in range(5):
+        bkt_mlf.append(bkt_benchmark(data_train, data_val, multilearn = 'opportunity', forgets = True))
+    bkt_mgs = []
+    for _ in range(5):
+        bkt_mgs.append(bkt_benchmark(data_train, data_val, multigs = 'opportunity', forgets = True))
     """
+    batches_val = construct_batches(data_val, val = True)
+    model.eval()
+    ypred, ytrue = evaluate(model, batches_val)

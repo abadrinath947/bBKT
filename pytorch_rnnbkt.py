@@ -93,38 +93,42 @@ def train(model, batches_train, batches_val, num_epochs):
         for X, y in batches_train:
             model.update(X, y)
         if epoch % 10 == 0:
-            print(benchmark)
             print(f"Epoch {epoch}/{num_epochs} - [VALIDATION ACCURACY: {model.score_acc(batches_val)}, VALIDATION AUC: {model.score_auc(batches_val)}, VALIDATION RMSE: {model.score_rmse(batches_val)}]")
             torch.save(model.state_dict(), f"ckpts/model-{tag}-{epoch}.pth")
 
 def bkt_benchmark(train_data, test_data, **model_type):
     model = Model()
-    model.fit(data = train_data.apply(pd.Series.explode).reset_index(), skills = skill, **model_type)
-    return model.evaluate(data = test_data.apply(pd.Series.explode).reset_index(), metric = ['auc', 'accuracy', 'rmse'])
+    try:
+        model.fit(data = train_data.apply(pd.Series.explode).reset_index(), **model_type)
+        return model.evaluate(data = test_data.apply(pd.Series.explode).reset_index(), metric = ['auc', 'accuracy', 'rmse'])
+    except:
+        model.fit(data = train_data.apply(pd.Series.explode).reset_index())
+        return model.evaluate(data = test_data.apply(pd.Series.explode).reset_index(), metric = ['auc', 'accuracy', 'rmse'])
 
 parser = argparse.ArgumentParser(description = 'Parse input data files into grader format.')
-parser.add_argument('--tag', required = True)
 parser.add_argument('--skill', required = True)
 
 args = parser.parse_args()
 
 original_data = pd.read_csv('as.csv', encoding = 'latin')
-skills = original_data['skill_name'].value_counts()[original_data['skill_name'].value_counts() > 1000].index
+# skills = original_data['skill_name'].value_counts()[original_data['skill_name'].value_counts() > 2000].index
 
-for skill in skills:
-    data = original_data[original_data['skill_name'] == skill]
-    tag = skill.replace(' ', '')
-    seqs = data.groupby('user_id').agg(list)
-    seqs = seqs.sample(frac = 1, random_state = 42)
-    seqs_train = seqs.iloc[int(len(seqs) * 0.1):]
-    seqs_val = seqs.iloc[:int(len(seqs) * 0.1)]
+# for skill in skills:
+skill = args.skill
+data = original_data[original_data['skill_name'] == skill]
+tag = skill.replace(' ', '').replace('/', '_')
+seqs = data.groupby('user_id').agg(list)
+seqs = seqs.sample(frac = 1, random_state = 42)
+seqs_train = seqs.iloc[int(len(seqs) * 0.1):]
+seqs_val = seqs.iloc[:int(len(seqs) * 0.1)]
 
-    benchmark = bkt_benchmark(seqs_train, seqs_val, multigs = True, multilearn = True, forgets = True)
+#benchmark = bkt_benchmark(seqs_train, seqs_val, multigs = 'opportunity', multilearn = 'opportunity', forgets = True)
+#print('BKT', skill, benchmark)
 
-    print(seqs_train.shape, seqs_val.shape)
-    batches_train = construct_batches(seqs_train['correct'])
-    batches_val = construct_batches(seqs_val['correct'])
-    model = BKT_RNN().cuda()
-    num_epochs = 51
+print(seqs_train.shape, seqs_val.shape)
+batches_train = construct_batches(seqs_train['correct'])
+batches_val = construct_batches(seqs_val['correct'])
+model = BKT_RNN().cuda()
+num_epochs = 500
 
-    train(model, batches_train, batches_val, num_epochs)
+train(model, batches_train, batches_val, num_epochs)
